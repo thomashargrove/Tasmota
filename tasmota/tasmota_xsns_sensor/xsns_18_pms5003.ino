@@ -27,8 +27,7 @@
  * You can either support PMS3003 or PMS5003-7003 at one time. To enable the PMS3003 support
  * you must enable the define PMS_MODEL_PMS3003 on your configuration file.
  * For PMSx003T models that report temperature and humidity define PMS_MODEL_PMS5003T
- * To get extended metrics (CF1, US_AQI, EPA_ADJUSTMENT) define PMS_EXTENDED_METRICS
-\*********************************************************************************************/
+ \*********************************************************************************************/
 
 #define XSNS_18             18
 
@@ -275,8 +274,40 @@ void PmsInit(void)
   }
 }
 
-#ifdef PMS_EXTENDED_METRICS
-int compute_us_aqi(uint16_t pm25_standard)
+// This gives more accurate data for forest fire smoke.  PurpleAir gives you this conversion option labeled "US EPA"
+// https://cfpub.epa.gov/si/si_public_record_report.cfm?dirEntryId=353088&Lab=CEMM
+// file:///Users/thargrove/Downloads/SENSORDATACLEANINGANDCORRECTIONAPPLICATIONONTHEAIRNOWFIREANDSMOKEAPP%20(1)%20(2).PDF
+/*
+Copy-paste from the PDF
+y={0 ≤ x <30: 0.524*x - 0.0862*RH + 5.75}
+y={30≤ x <50: (0.786*(x/20 - 3/2) + 0.524*(1 - (x/20 - 3/2)))*x -0.0862*RH + 5.75}
+y={50 ≤ x <210: 0.786*x - 0.0862*RH + 5.75}
+y={210 ≤ x <260: (0.69*(x/50 – 21/5) + 0.786*(1 - (x/50 – 21/5)))*x - 0.0862*RH*(1 - (x/50 – 21/5)) + 2.966*(x/50 – 21/5) + 5.75*(1 - (x/50 – 21/5)) + 8.84*(10^{-4})*x^{2}*(x/50 – 21/5)}
+y={260 ≤ x: 2.966 + 0.69*x + 8.84*10^{-4}*x^2}
+
+y= corrected PM2.5 µg/m3
+x= PM2.5 cf_atm (lower)
+RH= Relative humidity as measured by the PurpleAir
+*/
+int usaEpaStandardPm2d5Adjustment(int pm25_standard, int relative_humidity)
+{
+  // Rename to use the same variables from the paper
+  float x = pm25_standard;
+  float RH = relative_humidity;
+  if (x<30) {
+    return 0.524 * x - 0.0862 * RH + 5.75;
+  } else if(x<50) {
+    return (0.786 * (x/20.0 - 3.0/2.0) + 0.524 * (1.0 - (x/20.0 - 3.0/2.0))) * x - 0.0862 * RH + 5.75;
+  } else if(x<210) {
+    return 0.786 * x - 0.0862 * RH + 5.75;
+  } else if(x<260) {
+    return (0.69 * (x/50.0 - 21.0/5.0) + 0.786 * (1.0 - (x/50.0 - 21.0/5.0))) * x - 0.0862 * RH * (1.0 - (x/50.0 - 21.0/5.0)) + 2.966 * (x/50.0 - 21.0/5.0) + 5.75 * (1.0 - (x/50.0 - 21.0/5.0)) + 8.84 * pow(10.0, -4.0) * pow(x,2.0) * (x/50.0 - 21.0/5.0);
+  } else {
+    return 2.966 + 0.69 * x + 8.84 * pow(10.0, -4.0) * pow(x, 2.0);
+  }
+}
+
+int compute_us_aqi(int pm25_standard)
 {
   // https://forum.airnowtech.org/t/the-aqi-equation/169
   if (pm25_standard <= 12) {
@@ -296,14 +327,14 @@ int compute_us_aqi(uint16_t pm25_standard)
   }
 }
 
-const char* us_aqi_label(int us_aqi)
+const char* compute_us_aqi_label(int us_aqi)
 {
   if (us_aqi <= 50) {
     return "Good";
   } else if (us_aqi <= 100) {
     return "Moderate";
   } else if (us_aqi <= 150) {
-    return "Unhealthy For Sensitive Groups"
+    return "Unhealthy For Sensitive Groups";
   } else if (us_aqi <= 200) {
     return "Unhealthy";
   } else if (us_aqi <= 300) {
@@ -312,34 +343,24 @@ const char* us_aqi_label(int us_aqi)
     return "Hazardous";
   }
 }
-#endif // PMS_EXTENDED_METRICS
 
 #ifdef USE_WEBSERVER
 #ifdef PMS_MODEL_PMS3003
 const char HTTP_PMS3003_SNS[] PROGMEM =
-#ifdef PMS_EXTENDED_METRICS
-  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-#endif // PMS_EXTENDED_METRICS
+//  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
+//  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
+//  "{s}PMS3003 " D_STANDARD_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
   "{s}PMS3003 " D_ENVIRONMENTAL_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
   "{s}PMS3003 " D_ENVIRONMENTAL_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-  "{s}PMS3003 " D_ENVIRONMENTAL_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-#ifdef PMS_EXTENDED_METRICS
-  "{s}PMS3003 US AQI {m}%d{e}"
-  "{s}PMS3003 US AQI Label {m}%s{e}"
-#endif // PMS_EXTENDED_METRICS
-  ;
+  "{s}PMS3003 " D_ENVIRONMENTAL_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}";
 #else
 const char HTTP_PMS5003_SNS[] PROGMEM =
-#ifdef PMS_EXTENDED_METRICS
   "{s}PMS5003 " D_STANDARD_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
   "{s}PMS5003 " D_STANDARD_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
   "{s}PMS5003 " D_STANDARD_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-#endif // PMS_EXTENDED_METRICS
-  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
-  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
+//  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
+//  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 2.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
+//  "{s}PMS5003 " D_ENVIRONMENTAL_CONCENTRATION " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_MICROGRAM_PER_CUBIC_METER "{e}"
   "{s}PMS5003 " D_PARTICALS_BEYOND " 0.3 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}"
   "{s}PMS5003 " D_PARTICALS_BEYOND " 0.5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}"
   "{s}PMS5003 " D_PARTICALS_BEYOND " 1 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}"
@@ -349,12 +370,12 @@ const char HTTP_PMS5003_SNS[] PROGMEM =
   "{s}PMS5003 " D_HUMIDITY "{m}%*_f " D_UNIT_PERCENT "{e}"
 #else
   "{s}PMS5003 " D_PARTICALS_BEYOND " 5 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}"
-  "{s}PMS5003 " D_PARTICALS_BEYOND " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}"
+  "{s}PMS5003 " D_PARTICALS_BEYOND " 10 " D_UNIT_MICROMETER "{m}%d " D_UNIT_PARTS_PER_DECILITER "{e}";      // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
 #endif  // PMS_MODEL_PMS5003T
-#ifdef PMS_EXTENDED_METRICS
   "{s}PMS3003 US AQI {m}%d{e}"
   "{s}PMS3003 US AQI Label {m}%s{e}"
-#endif // PMS_EXTENDED_METRICS
+  "{s}PMS3003 EPA US AQI {m}%d{e}"
+  "{s}PMS3003 EPA US AQI Label {m}%s{e}"
   ;      // {s} = <tr><th>, {m} = </th><td>, {e} = </td></tr>
 #endif  // PMS_MODEL_PMS3003
 #endif  // USE_WEBSERVER
@@ -365,24 +386,25 @@ void PmsShow(bool json)
 #ifdef PMS_MODEL_PMS5003T
     float temperature = ConvertTemp(pms_data.temperature10x/10.0);
     float humidity = ConvertHumidity(pms_data.humidity10x/10.0);
+    int epa_us_aqi = compute_us_aqi(usaEpaStandardPm2d5Adjustment(pms_data.pm25_standard, humidity));
+    const char* epa_us_aqi_label = compute_us_aqi_label(epa_us_aqi);
 #endif // PMS_MODEL_PMS5003T
-#ifdef PMS_EXTENDED_METRICS
     int us_aqi = compute_us_aqi(pms_data.pm25_standard);
-    const char* us_aqi_label = us_aqi_label(us_aqi);
-#endif // PMS_EXTENDED_METRICS
+    const char* us_aqi_label = compute_us_aqi_label(us_aqi);
     if (json) {
 #ifdef PMS_MODEL_PMS3003
       ResponseAppend_P(PSTR(",\"PMS3003\":{\"CF1\":%d,\"CF2.5\":%d,\"CF10\":%d,\"PM1\":%d,\"PM2.5\":%d,\"PM10\":%d}"),
         pms_data.pm10_standard, pms_data.pm25_standard, pms_data.pm100_standard,
         pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env);
 #else
-      ResponseAppend_P(PSTR(",\"PMS5003\":{\"CF1\":%d,\"CF2.5\":%d,\"CF10\":%d,\"PM1\":%d,\"PM2.5\":%d,\"PM10\":%d,\"PB0.3\":%d,\"PB0.5\":%d,\"PB1\":%d,\"PB2.5\":%d,"),
+      ResponseAppend_P(PSTR(",\"PMS5003\":{\"CF1\":%d,\"CF2.5\":%d,\"CF10\":%d,\"PM1\":%d,\"PM2.5\":%d,\"PM10\":%d,\"PB0.3\":%d,\"PB0.5\":%d,\"PB1\":%d,\"PB2.5\":%d,\"AQI\":%d,\"AQI_Label\":\"%s\","),
         pms_data.pm10_standard, pms_data.pm25_standard, pms_data.pm100_standard,
         pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env,
-        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um);
+        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um,
+        us_aqi, us_aqi_label);
 #ifdef PMS_MODEL_PMS5003T
-      ResponseAppend_P(PSTR("\"" D_JSON_TEMPERATURE "\":%*_f,\"" D_JSON_HUMIDITY "\":%*_f}"),
-        Settings->flag2.temperature_resolution, &temperature, Settings->flag2.humidity_resolution, &humidity);
+      ResponseAppend_P(PSTR("\"" D_JSON_TEMPERATURE "\":%*_f,\"" D_JSON_HUMIDITY "\":%*_f,\"EPA_AQI\":%d,\"EPA_AQI_Label\":\"%s\"}"),
+        Settings->flag2.temperature_resolution, &temperature, Settings->flag2.humidity_resolution, &humidity, us_aqi, us_aqi_label);
 #else
       ResponseAppend_P(PSTR("\"PB5\":%d,\"PB10\":%d}"),
         pms_data.particles_50um, pms_data.particles_100um);
@@ -404,18 +426,14 @@ void PmsShow(bool json)
         pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env);
 #elif defined(PMS_MODEL_PMS5003T)
         WSContentSend_PD(HTTP_PMS5003_SNS,
-#ifdef PMS_EXTENDED_METRICS
         pms_data.pm10_standard, pms_data.pm25_standard, pms_data.pm100_standard,
-#endif // PMS_EXTENDED_METRICS
-        pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env,
-        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um, Settings->flag2.temperature_resolution, &temperature, TempUnit(), Settings->flag2.humidity_resolution, &humidity);
+        //pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env,
+        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um, Settings->flag2.temperature_resolution, &temperature, TempUnit(), Settings->flag2.humidity_resolution, &humidity, us_aqi, us_aqi_label, epa_us_aqi, epa_us_aqi_label);
 #else
         WSContentSend_PD(HTTP_PMS5003_SNS,
-#ifdef PMS_EXTENDED_METRICS
         pms_data.pm10_standard, pms_data.pm25_standard, pms_data.pm100_standard,
-#endif // PMS_EXTENDED_METRICS
-        pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env,
-        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um, pms_data.particles_50um, pms_data.particles_100um);
+        //pms_data.pm10_env, pms_data.pm25_env, pms_data.pm100_env,
+        pms_data.particles_03um, pms_data.particles_05um, pms_data.particles_10um, pms_data.particles_25um, pms_data.particles_50um, pms_data.particles_100um, us_aqi, us_aqi_label, 0, "");
 #endif  // PMS_MODEL_PMS3003
 #endif  // USE_WEBSERVER
     }
